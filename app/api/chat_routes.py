@@ -5,6 +5,7 @@ This module provides RAG-augmented chat endpoints that combine semantic search
 with LLM generation to answer questions based on your notes.
 """
 
+import re
 from typing import Any, List
 
 from fastapi import APIRouter, HTTPException
@@ -142,7 +143,30 @@ IMPORTANT INSTRUCTIONS:
 5. Be concise but complete in your answer
 6. Use markdown formatting for better readability (headers, lists, code blocks, etc.)
 
-7. CRITICAL - Mathematical Notation Requirements:
+7. CRITICAL - LaTeX Output Format Requirements:
+   Before you respond, verify your output follows these rules:
+   ✓ ALL math variables MUST be wrapped in $...$ (e.g., $x$, $y$, $S$, $V$)
+   ✓ ALL math expressions MUST be wrapped in $...$ (e.g., $x+y \in S$)
+   ✓ ALL display equations MUST use $$...$$ (e.g., $$\int_0^1 f(x) dx$$)
+   ✗ NEVER use [ \begin{...} ] for equations (this is INVALID markdown)
+   ✗ NEVER output bare math symbols like ∈, ∑, ∏, ∫ without delimiters
+
+   Example of CORRECT formatting:
+   "Let $S$ be a subspace of $V$. Then $x+y \in S$ for all $x, y \in S$."
+
+   Example of INCORRECT formatting:
+   "Let S be a subspace of V. Then x+y∈S for all x,y∈S."
+
+   For systems of equations, use:
+   $$\begin{align*}
+   7c_1 - 10c_2 - c_3 &= 0 \\
+   -14c_1 + 15c_2 &= 0 \\
+   6c_1 + 15c_2 + 3c_3 &= 0
+   \end{align*}$$
+
+   NEVER use: [ \begin{align*}... ] (this is invalid markdown)
+
+8. CRITICAL - Mathematical Notation Requirements:
    You MUST output ALL mathematical content using standard LaTeX notation.
 
    LaTeX Formatting Rules:
@@ -159,7 +183,7 @@ IMPORTANT INSTRUCTIONS:
      * Matrices: $\\begin{{bmatrix}} a & b \\\\ c & d \\end{{bmatrix}}$
      * Sums/products: $\\sum_{{i=1}}^n$, $\\prod_{{i=1}}^n$
 
-8. CRITICAL - Clean PDF Artifacts:
+9. CRITICAL - Clean PDF Artifacts:
    The context may contain malformed PDF characters. You MUST convert them to proper LaTeX:
 
    Common PDF artifacts and their LaTeX equivalents:
@@ -183,6 +207,57 @@ USER QUERY: {query}
 ANSWER (based only on the context above, with proper LaTeX formatting):"""
 
     return prompt
+
+
+def clean_latex_formatting(text: str) -> str:
+    """
+    Clean and fix common LaTeX formatting issues in LLM responses.
+
+    This function applies conservative fixes to ensure mathematical notation
+    renders properly in the frontend (ReactMarkdown + KaTeX).
+
+    Fixes applied:
+    1. Invalid equation blocks: [ \\begin{...} ] → $$\\begin{...}$$
+    2. Bare math symbols (∈, ∑, etc.) → wrapped in delimiters
+
+    Args:
+        text: Raw LLM response text
+
+    Returns:
+        Cleaned text with proper LaTeX formatting
+
+    Examples:
+        >>> clean_latex_formatting("[ \\begin{align*}x=1\\end{align*} ]")
+        "$$\\begin{align*}x=1\\end{align*}$$"
+
+        >>> clean_latex_formatting("x∈S")
+        "x$∈$S"
+    """
+    # Fix 1: Invalid equation blocks with square brackets
+    # Pattern: [ \begin{align*}...\end{align*} ]
+    # Replace with: $$\begin{align*}...\end{align*}$$
+    text = re.sub(
+        r'\[\s*\\begin\{(align\*?|equation\*?|gather\*?|cases|split|multline\*?)\}(.*?)\\end\{\1\}\s*\]',
+        r'$$\\begin{\1}\2\\end{\1}$$',
+        text,
+        flags=re.DOTALL
+    )
+
+    # Fix 2: Ensure common math symbols are wrapped in delimiters
+    # Only wrap if not already inside $...$ or $$...$$
+    math_symbols = ['∈', '∉', '⊆', '⊇', '⊂', '⊃', '∪', '∩', '∑', '∏', '∫', '∮',
+                    '∞', '≤', '≥', '≠', '≈', '≡', '∝', '⊥', '∥', '∀', '∃', '∇']
+
+    for symbol in math_symbols:
+        # Split by $ to identify math mode vs text mode
+        # Even indices = text mode, odd indices = math mode
+        parts = text.split('$')
+        for i in range(0, len(parts), 2):  # Only process text mode parts
+            if symbol in parts[i]:
+                parts[i] = parts[i].replace(symbol, f'${symbol}$')
+        text = '$'.join(parts)
+
+    return text
 
 
 # API Endpoints
@@ -220,10 +295,18 @@ async def chat(request: ChatRequest, rag: RAGDep, llm: LLMDep) -> ChatResponse:
         # Step 3: Generate answer using LLM
         answer = await llm.generate_response(prompt)
 
-        # Step 4: Format response
+        # Step 4: Clean LaTeX formatting
+        original_answer = answer.strip()
+        cleaned_answer = clean_latex_formatting(original_answer)
+
+        # Log when corrections were applied
+        if original_answer != cleaned_answer:
+            print(f"⚠️  Applied LaTeX formatting corrections to response")
+
+        # Step 5: Format response
         return ChatResponse(
             query=request.query,
-            answer=answer.strip(),
+            answer=cleaned_answer,
             context_used=[
                 ContextChunk(
                     text=chunk["text"],
@@ -313,9 +396,17 @@ async def chat_simple(
         # Generate answer
         answer = await llm.generate_response(prompt)
 
+        # Clean LaTeX formatting
+        original_answer = answer.strip()
+        cleaned_answer = clean_latex_formatting(original_answer)
+
+        # Log when corrections were applied
+        if original_answer != cleaned_answer:
+            print(f"⚠️  Applied LaTeX formatting corrections to response (simple endpoint)")
+
         return SimpleChatResponse(
             query=query,
-            answer=answer.strip(),
+            answer=cleaned_answer,
             num_chunks_used=len(context_chunks),
         )
 
