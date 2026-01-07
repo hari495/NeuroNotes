@@ -60,15 +60,17 @@ export async function createNoteOnBackend(title, text) {
  * @param {string} query - The user's question
  * @param {number} k - Number of context chunks to retrieve (default: 3)
  * @param {boolean} includeSources - Whether to include sources (default: true)
+ * @param {string|null} noteId - Filter by specific note ID (null = search all notes)
  * @returns {Promise<Object>} The API response data
  */
-export async function sendChatMessage(query, k = 3, includeSources = true) {
+export async function sendChatMessage(query, k = 3, includeSources = true, noteId = null) {
   const response = await axios.post(
     `${API_BASE_URL}/api/chat/chat`,
     {
       query,
       k,
       include_sources: includeSources,
+      note_id: noteId,
     },
     {
       timeout: 120000, // 2 minute timeout for LLM generation

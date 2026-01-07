@@ -13,7 +13,7 @@ import 'katex/dist/katex.min.css';
 import { sendChatMessage } from '../services/api';
 import './Chat.css';
 
-function Chat() {
+function Chat({ selectedNote }) {
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -51,7 +51,9 @@ function Chat() {
 
     try {
       // Send query to backend (k=5 after re-ranking)
-      const response = await sendChatMessage(query, 5, true);
+      // If a note is selected, only search that note. Otherwise search all notes.
+      const noteId = selectedNote?.backendNoteId || null;
+      const response = await sendChatMessage(query, 5, true, noteId);
 
       // Add assistant message to chat
       const assistantMessage = {
@@ -107,7 +109,11 @@ function Chat() {
       <div className="chat-header">
         <div>
           <h2>💬 Chat with Your Notes</h2>
-          <p className="chat-subtitle">Ask questions about your uploaded notes</p>
+          <p className="chat-subtitle">
+            {selectedNote
+              ? `🎯 Searching only: ${selectedNote.title}`
+              : 'Searching all uploaded notes'}
+          </p>
         </div>
         {messages.length > 0 && (
           <button onClick={handleClearChat} className="clear-button" title="Clear chat">

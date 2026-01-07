@@ -34,6 +34,10 @@ class ChatRequest(BaseModel):
         ge=1,
         le=10,
     )
+    note_id: str | None = Field(
+        default=None,
+        description="Filter by specific note ID (searches only that note)",
+    )
     filter_metadata: dict[str, Any] | None = Field(
         default=None,
         description="Optional metadata filters for context retrieval",
@@ -196,11 +200,18 @@ async def chat(request: ChatRequest, rag: RAGDep, llm: LLMDep) -> ChatResponse:
     factual answers grounded in your knowledge base.
     """
     try:
+        # Build filter metadata
+        filter_metadata = request.filter_metadata or {}
+
+        # If note_id is provided, filter by that specific note
+        if request.note_id:
+            filter_metadata["note_id"] = request.note_id
+
         # Step 1: Retrieve relevant context
         context_chunks = await rag.query_notes(
             query=request.query,
             k=request.k,
-            filter_metadata=request.filter_metadata,
+            filter_metadata=filter_metadata if filter_metadata else None,
         )
 
         # Step 2: Construct RAG prompt

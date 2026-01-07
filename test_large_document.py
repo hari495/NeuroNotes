@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from app.core.config import get_settings
 from app.services.rag_service import RAGService
-from app.services.ollama_service import OllamaEmbeddingProvider
+from app.services.ollama_service import OllamaEmbedding
 
 
 async def create_large_test_document(num_pages: int = 500) -> str:
@@ -85,7 +85,7 @@ async def test_large_document_ingestion():
 
     # Initialize services
     settings = get_settings()
-    embedding_provider = OllamaEmbeddingProvider(settings)
+    embedding_provider = OllamaEmbedding(settings)
     rag_service = RAGService(settings, embedding_provider)
 
     print("\n✅ Services initialized")
@@ -159,7 +159,7 @@ async def test_query_after_ingestion():
 
     # Initialize services
     settings = get_settings()
-    embedding_provider = OllamaEmbeddingProvider(settings)
+    embedding_provider = OllamaEmbedding(settings)
     rag_service = RAGService(settings, embedding_provider)
 
     # Test queries
