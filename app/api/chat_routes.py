@@ -29,8 +29,8 @@ class ChatRequest(BaseModel):
         examples=["What is machine learning?"],
     )
     k: int = Field(
-        default=3,
-        description="Number of context chunks to retrieve from notes",
+        default=5,
+        description="Number of context chunks to retrieve from notes (after re-ranking)",
         ge=1,
         le=10,
     )
@@ -78,8 +78,8 @@ class StreamChatRequest(BaseModel):
         max_length=2000,
     )
     k: int = Field(
-        default=3,
-        description="Number of context chunks to retrieve",
+        default=5,
+        description="Number of context chunks to retrieve (after re-ranking)",
         ge=1,
         le=10,
     )
@@ -278,7 +278,7 @@ async def chat_stream(request: StreamChatRequest, rag: RAGDep, llm: LLMDep) -> S
 @router.post("/chat/simple", response_model=SimpleChatResponse)
 async def chat_simple(
     query: str,
-    k: int = 3,
+    k: int = 5,
     rag: RAGDep = RAGDep,
     llm: LLMDep = LLMDep,
 ) -> SimpleChatResponse:
@@ -287,7 +287,7 @@ async def chat_simple(
 
     Args:
         query: The user's question.
-        k: Number of context chunks to retrieve (default: 3).
+        k: Number of context chunks to retrieve (default: 5, after re-ranking).
 
     Returns:
         A simple response with query, answer, and number of chunks used.

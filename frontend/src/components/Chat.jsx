@@ -50,8 +50,8 @@ function Chat() {
     setError(null);
 
     try {
-      // Send query to backend
-      const response = await sendChatMessage(query, 3, true);
+      // Send query to backend (k=5 after re-ranking)
+      const response = await sendChatMessage(query, 5, true);
 
       // Add assistant message to chat
       const assistantMessage = {

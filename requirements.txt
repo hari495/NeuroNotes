@@ -7,7 +7,7 @@ pydantic-settings==2.7.0
 # AI/ML Dependencies
 ollama==0.4.4
 chromadb==0.5.23
-flashrank==0.2.11
+flashrank==0.2.10
 
 # Frontend
 streamlit==1.41.1
@@ -17,7 +17,7 @@ python-dotenv==1.0.1
 httpx==0.27.0
 aiofiles==24.1.0
 python-multipart==0.0.20
-PyPDF2==3.0.1
+pypdf==5.1.0
 
 # Development Dependencies
 pytest==8.3.4

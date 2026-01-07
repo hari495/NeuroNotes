@@ -14,14 +14,19 @@ import {
   formatTimestamp,
   truncateText,
 } from '../utils/fileReader';
+import type { Note, UploadStatus } from '../types/note';
 import './NoteList.css';
 
-function NoteList({ onNoteSelect }) {
-  const [notes, setNotes] = useState([]);
-  const [selectedNoteId, setSelectedNoteId] = useState(null);
+interface NoteListProps {
+  onNoteSelect?: (note: Note | null) => void;
+}
+
+function NoteList({ onNoteSelect }: NoteListProps) {
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState(null);
-  const [error, setError] = useState(null);
+  const [uploadStatus, setUploadStatus] = useState<UploadStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   // Load notes from IndexedDB on mount
   useEffect(() => {
@@ -38,8 +43,8 @@ function NoteList({ onNoteSelect }) {
     }
   };
 
-  const handleFileUpload = async (event) => {
-    const file = event.target.files[0];
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
     if (!file) return;
 
     setIsUploading(true);
@@ -58,12 +63,12 @@ function NoteList({ onNoteSelect }) {
       console.log('Backend response:', backendResponse);
 
       // Step 3: Save to IndexedDB
-      const note = {
+      const note: Note = {
         id: noteId,
         title: title,
         content: content,
         timestamp: Date.now(),
-        backendNoteId: backendResponse.note_id, // Store backend ID for reference
+        backendNoteId: backendResponse.note_id,
         filename: file.name,
         chunksCreated: backendResponse.chunks_created,
       };
@@ -80,7 +85,7 @@ function NoteList({ onNoteSelect }) {
 
       // Clear the file input
       event.target.value = '';
-    } catch (err) {
+    } catch (err: any) {
       console.error('File upload failed:', err);
       setError(err.response?.data?.detail || err.message || 'Failed to upload file');
       setUploadStatus({
@@ -92,14 +97,14 @@ function NoteList({ onNoteSelect }) {
     }
   };
 
-  const handleNoteClick = (note) => {
+  const handleNoteClick = (note: Note) => {
     setSelectedNoteId(note.id);
     if (onNoteSelect) {
       onNoteSelect(note);
     }
   };
 
-  const handleDeleteNote = async (noteId, event) => {
+  const handleDeleteNote = async (noteId: string, event: React.MouseEvent) => {
     event.stopPropagation(); // Prevent note selection when deleting
 
     if (!confirm('Are you sure you want to delete this note from local storage?')) {
@@ -205,7 +210,7 @@ function NoteList({ onNoteSelect }) {
           💡 Notes are stored locally in your browser and indexed in the backend for AI chat.
         </p>
         <p className="info-text">
-          Supported formats: .txt, .md, .pdf
+          📁 Supported formats: .txt, .md, .pdf
         </p>
       </div>
     </div>

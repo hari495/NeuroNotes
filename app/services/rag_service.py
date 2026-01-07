@@ -2,14 +2,16 @@
 RAG (Retrieval-Augmented Generation) Service.
 
 This module provides the core RAG functionality including document ingestion,
-chunking, embedding, and semantic retrieval using ChromaDB.
+chunking, embedding, and semantic retrieval using ChromaDB with FlashRank re-ranking.
 """
 
+import time
 import uuid
 from typing import Any, List
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
+from flashrank import Ranker, RerankRequest
 
 from app.core.config import Settings
 from app.core.interfaces import EmbeddingProvider
@@ -23,7 +25,7 @@ class RAGService:
     - Document chunking
     - Embedding generation via EmbeddingProvider
     - Vector storage in ChromaDB
-    - Semantic search and retrieval
+    - Semantic search with FlashRank re-ranking for improved accuracy
     """
 
     def __init__(self, settings: Settings, embedding_provider: EmbeddingProvider) -> None:
@@ -53,39 +55,158 @@ class RAGService:
             metadata={"hnsw:space": "cosine"},  # Use cosine similarity
         )
 
-    def chunk_text(self, text: str) -> List[str]:
-        """
-        Split text into chunks for embedding.
+        # Initialize FlashRank re-ranker (fast, local, lightweight)
+        # Using ms-marco-MiniLM-L-12-v2 model (default, optimized for speed)
+        try:
+            self.reranker = Ranker(model_name="ms-marco-MiniLM-L-12-v2", cache_dir=str(chroma_path / "flashrank"))
+            self.reranker_available = True
+            print("✓ FlashRank re-ranker initialized successfully")
+        except Exception as e:
+            print(f"⚠ FlashRank initialization failed: {e}. Falling back to vector search only.")
+            self.reranker = None
+            self.reranker_available = False
 
-        Uses simple character-based chunking with overlap for context preservation.
+    def chunk_text(self, text: str, chunk_size: int = 1000, chunk_overlap: int = 200) -> List[str]:
+        """
+        Split text into chunks using recursive character splitting.
+
+        This method implements a RecursiveCharacterTextSplitter that tries to split
+        on natural boundaries (paragraphs, sentences, words) before falling back to
+        character-level splitting. This prevents cutting sentences in half, which is
+        crucial for technical and math textbooks.
+
+        Splitting hierarchy:
+        1. Double newlines (paragraphs)
+        2. Single newlines (lines)
+        3. Spaces (words)
+        4. Characters (fallback)
 
         Args:
             text: The input text to chunk.
+            chunk_size: Maximum size of each chunk (default: 1000).
+            chunk_overlap: Number of characters to overlap between chunks (default: 200).
 
         Returns:
             List of text chunks.
         """
-        chunk_size = self.settings.rag_chunk_size
-        chunk_overlap = self.settings.rag_chunk_overlap
-
         # Handle empty or very short text
+        if not text or not text.strip():
+            return []
+
         if len(text) <= chunk_size:
-            return [text] if text.strip() else []
+            return [text]
 
-        chunks = []
-        start = 0
+        # Separators in order of preference (try to split on natural boundaries first)
+        separators = ["\n\n", "\n", ". ", " ", ""]
 
-        while start < len(text):
-            # Get chunk from start to start + chunk_size
-            end = start + chunk_size
-            chunk = text[start:end]
+        return self._recursive_split(text, chunk_size, chunk_overlap, separators)
 
-            # Only add non-empty chunks
-            if chunk.strip():
-                chunks.append(chunk)
+    def _recursive_split(
+        self, text: str, chunk_size: int, chunk_overlap: int, separators: List[str]
+    ) -> List[str]:
+        """
+        Recursively split text using the provided separators.
 
-            # Move start position with overlap
-            start += chunk_size - chunk_overlap
+        Args:
+            text: Text to split.
+            chunk_size: Maximum chunk size.
+            chunk_overlap: Overlap between chunks.
+            separators: List of separators to try in order.
+
+        Returns:
+            List of text chunks.
+        """
+        final_chunks: List[str] = []
+
+        # Get the current separator
+        separator = separators[0] if separators else ""
+
+        # Split the text by the current separator
+        if separator:
+            splits = text.split(separator)
+        else:
+            splits = list(text)  # Character-level split
+
+        # Process each split
+        good_splits: List[str] = []
+        for split in splits:
+            if len(split) <= chunk_size:
+                good_splits.append(split)
+            else:
+                # This split is too large, need to split it further
+                if good_splits:
+                    # Merge accumulated good splits first
+                    final_chunks.extend(
+                        self._merge_splits(good_splits, chunk_size, chunk_overlap, separator)
+                    )
+                    good_splits = []
+
+                # Recursively split the large chunk with next separator
+                if len(separators) > 1:
+                    final_chunks.extend(
+                        self._recursive_split(split, chunk_size, chunk_overlap, separators[1:])
+                    )
+                else:
+                    # No more separators, force split at chunk_size
+                    for i in range(0, len(split), chunk_size - chunk_overlap):
+                        final_chunks.append(split[i : i + chunk_size])
+
+        # Merge any remaining good splits
+        if good_splits:
+            final_chunks.extend(self._merge_splits(good_splits, chunk_size, chunk_overlap, separator))
+
+        return [chunk for chunk in final_chunks if chunk.strip()]
+
+    def _merge_splits(
+        self, splits: List[str], chunk_size: int, chunk_overlap: int, separator: str
+    ) -> List[str]:
+        """
+        Merge small splits into chunks of appropriate size.
+
+        Args:
+            splits: List of text segments to merge.
+            chunk_size: Maximum chunk size.
+            chunk_overlap: Overlap between chunks.
+            separator: Separator used to join splits.
+
+        Returns:
+            List of merged chunks.
+        """
+        chunks: List[str] = []
+        current_chunk: List[str] = []
+        current_length = 0
+
+        for split in splits:
+            split_len = len(split)
+            separator_len = len(separator) if current_chunk else 0
+
+            # Check if adding this split would exceed chunk_size
+            if current_length + split_len + separator_len > chunk_size and current_chunk:
+                # Save current chunk and start a new one
+                chunk_text = separator.join(current_chunk)
+                chunks.append(chunk_text)
+
+                # Create overlap by keeping some of the previous content
+                # Keep splits that fit within the overlap window
+                overlap_length = 0
+                overlap_splits: List[str] = []
+                for prev_split in reversed(current_chunk):
+                    if overlap_length + len(prev_split) + len(separator) <= chunk_overlap:
+                        overlap_splits.insert(0, prev_split)
+                        overlap_length += len(prev_split) + len(separator)
+                    else:
+                        break
+
+                current_chunk = overlap_splits
+                current_length = overlap_length
+
+            # Add the split to current chunk
+            current_chunk.append(split)
+            current_length += split_len + separator_len
+
+        # Add the last chunk if not empty
+        if current_chunk:
+            chunks.append(separator.join(current_chunk))
 
         return chunks
 
@@ -93,24 +214,28 @@ class RAGService:
         self,
         note_text: str,
         metadata: dict[str, Any] | None = None,
+        batch_size: int = 50,
     ) -> dict[str, Any]:
         """
-        Ingest a note into the RAG system.
+        Ingest a note into the RAG system with robust batch processing.
 
         This function:
-        1. Chunks the note text
-        2. Generates embeddings for each chunk
-        3. Stores chunks and embeddings in ChromaDB
+        1. Chunks the note text using RecursiveCharacterTextSplitter
+        2. Generates embeddings for chunks in batches
+        3. Stores chunks and embeddings in ChromaDB with progress logging
+        4. Handles errors gracefully, continuing to next batch on failure
 
         Args:
             note_text: The text content of the note.
             metadata: Optional metadata to attach to the note chunks.
+            batch_size: Number of chunks to process per batch (default: 50).
 
         Returns:
             A dictionary containing ingestion statistics and the note ID.
 
         Raises:
-            Exception: If ingestion fails.
+            ValueError: If note text is empty or chunking fails.
+            Exception: If all batches fail during ingestion.
         """
         if not note_text or not note_text.strip():
             raise ValueError("Note text cannot be empty")
@@ -122,58 +247,137 @@ class RAGService:
         base_metadata = metadata or {}
         base_metadata["note_id"] = note_id
 
-        # Chunk the text
-        chunks = self.chunk_text(note_text)
+        # Chunk the text using RecursiveCharacterTextSplitter with optimized settings
+        chunks = self.chunk_text(note_text, chunk_size=1000, chunk_overlap=200)
 
         if not chunks:
             raise ValueError("Text chunking resulted in no chunks")
 
-        # Generate embeddings for all chunks
-        embeddings = await self.embedding_provider.get_embeddings_batch(chunks)
+        total_chunks = len(chunks)
+        print(f"📄 Chunking complete: {total_chunks} chunks created")
+        print(f"🔄 Processing in batches of {batch_size}...")
 
-        # Prepare data for ChromaDB
-        ids = [f"{note_id}_chunk_{i}" for i in range(len(chunks))]
-        metadatas = [
-            {
-                **base_metadata,
-                "chunk_index": i,
-                "total_chunks": len(chunks),
-            }
-            for i in range(len(chunks))
-        ]
+        # Track statistics
+        successful_chunks = 0
+        failed_chunks = 0
+        failed_batches: List[int] = []
 
-        # Add to ChromaDB collection
-        self.collection.add(
-            ids=ids,
-            embeddings=embeddings,
-            documents=chunks,
-            metadatas=metadatas,
-        )
+        # Process chunks in batches
+        for batch_start in range(0, total_chunks, batch_size):
+            batch_end = min(batch_start + batch_size, total_chunks)
+            batch_num = (batch_start // batch_size) + 1
+            total_batches = (total_chunks + batch_size - 1) // batch_size
 
+            batch_chunks = chunks[batch_start:batch_end]
+            batch_size_actual = len(batch_chunks)
+
+            try:
+                # Generate embeddings for this batch
+                print(
+                    f"⏳ Processing batch {batch_num}/{total_batches} "
+                    f"(chunks {batch_start + 1}-{batch_end}/{total_chunks})..."
+                )
+
+                embeddings = await self.embedding_provider.get_embeddings_batch(batch_chunks)
+
+                # Prepare data for ChromaDB
+                batch_ids = [
+                    f"{note_id}_chunk_{i}" for i in range(batch_start, batch_end)
+                ]
+                batch_metadatas = [
+                    {
+                        **base_metadata,
+                        "chunk_index": i,
+                        "total_chunks": total_chunks,
+                    }
+                    for i in range(batch_start, batch_end)
+                ]
+
+                # Add batch to ChromaDB collection
+                self.collection.add(
+                    ids=batch_ids,
+                    embeddings=embeddings,
+                    documents=batch_chunks,
+                    metadatas=batch_metadatas,
+                )
+
+                successful_chunks += batch_size_actual
+                print(
+                    f"✓ Batch {batch_num}/{total_batches} completed successfully "
+                    f"({successful_chunks}/{total_chunks} chunks processed)"
+                )
+
+                # Add small delay between batches to let the local LLM cool down
+                # Skip delay for last batch
+                if batch_end < total_chunks:
+                    time.sleep(0.5)
+
+            except Exception as e:
+                # Log error but continue with next batch
+                failed_chunks += batch_size_actual
+                failed_batches.append(batch_num)
+                print(
+                    f"✗ Batch {batch_num}/{total_batches} failed: {str(e)}"
+                )
+                print(
+                    f"⚠ Continuing to next batch... "
+                    f"({failed_chunks} chunks failed so far)"
+                )
+                continue
+
+        # Print final summary
+        print("\n" + "=" * 60)
+        print(f"📊 Ingestion Summary:")
+        print(f"   Total chunks: {total_chunks}")
+        print(f"   Successful: {successful_chunks} ✓")
+        print(f"   Failed: {failed_chunks} ✗")
+        if failed_batches:
+            print(f"   Failed batches: {failed_batches}")
+        print("=" * 60 + "\n")
+
+        # If all batches failed, raise an exception
+        if successful_chunks == 0:
+            raise Exception(
+                f"All {total_batches} batches failed during ingestion. "
+                f"Check your embedding provider and ChromaDB connection."
+            )
+
+        # Return statistics (include both successful and failed chunks)
         return {
             "note_id": note_id,
-            "chunks_created": len(chunks),
+            "chunks_created": successful_chunks,
+            "chunks_failed": failed_chunks,
+            "total_chunks": total_chunks,
             "total_characters": len(note_text),
-            "embedding_dimension": len(embeddings[0]) if embeddings else 0,
+            "embedding_dimension": (
+                self.embedding_provider.get_embedding_dimension()
+                if successful_chunks > 0
+                else 0
+            ),
+            "success_rate": f"{(successful_chunks / total_chunks * 100):.1f}%",
         }
 
     async def query_notes(
         self,
         query: str,
-        k: int = 3,
+        k: int = 5,
         filter_metadata: dict[str, Any] | None = None,
     ) -> List[dict[str, Any]]:
         """
-        Query the RAG system for relevant note chunks.
+        Query the RAG system for relevant note chunks with re-ranking.
 
-        This function:
+        This function implements a two-stage retrieval strategy for improved accuracy:
         1. Generates an embedding for the query
-        2. Performs semantic search in ChromaDB
-        3. Returns the top k most similar chunks
+        2. Performs semantic search in ChromaDB to retrieve 50 candidate chunks (high recall)
+        3. Uses FlashRank to re-score and re-rank the candidates against the query
+        4. Returns the top k most relevant chunks (high precision)
+
+        This approach allows deep search across all 968+ chunks while only sending
+        the highest-quality, most relevant chunks to the LLM.
 
         Args:
             query: The search query text.
-            k: Number of results to return (default: 3, max: 100).
+            k: Number of final results to return after re-ranking (default: 5, max: 50).
             filter_metadata: Optional metadata filters for the search.
 
         Returns:
@@ -181,33 +385,37 @@ class RAGService:
             - id: Chunk ID
             - text: Chunk text content
             - metadata: Chunk metadata
-            - distance: Similarity distance (lower = more similar)
+            - distance: Similarity distance (lower = more similar, from ChromaDB)
+            - rerank_score: Re-ranking score (higher = more relevant, only if re-ranker available)
 
         Raises:
+            ValueError: If query is empty.
             Exception: If query fails.
         """
         if not query or not query.strip():
             raise ValueError("Query cannot be empty")
 
         # Limit k to reasonable bounds
-        k = max(1, min(k, 100))
+        k = max(1, min(k, 50))
 
-        # Generate embedding for the query
+        # STEP 1: Generate embedding for the query
         query_embedding = await self.embedding_provider.get_embedding(query)
 
-        # Search ChromaDB
+        # STEP 2: Retrieve candidate chunks from ChromaDB (high recall)
+        # Retrieve 50 chunks to maximize recall, then re-rank for precision
+        initial_k = 50
         results = self.collection.query(
             query_embeddings=[query_embedding],
-            n_results=k,
+            n_results=initial_k,
             where=filter_metadata,
             include=["documents", "metadatas", "distances"],
         )
 
-        # Format results
-        formatted_results = []
+        # Format initial results
+        candidate_chunks = []
         if results["ids"] and results["ids"][0]:
             for i in range(len(results["ids"][0])):
-                formatted_results.append(
+                candidate_chunks.append(
                     {
                         "id": results["ids"][0][i],
                         "text": results["documents"][0][i],
@@ -216,7 +424,54 @@ class RAGService:
                     }
                 )
 
-        return formatted_results
+        # If no results or re-ranker unavailable, return vector search results
+        if not candidate_chunks:
+            return []
+
+        if not self.reranker_available or self.reranker is None:
+            # Fallback: return top k from vector search
+            return candidate_chunks[:k]
+
+        # STEP 3: Re-rank using FlashRank for improved relevance
+        try:
+            # Prepare passages for re-ranking
+            passages = [
+                {
+                    "id": i,
+                    "text": chunk["text"],
+                    "meta": {
+                        "chunk_id": chunk["id"],
+                        "distance": chunk["distance"],
+                        "metadata": chunk["metadata"],
+                    },
+                }
+                for i, chunk in enumerate(candidate_chunks)
+            ]
+
+            # Perform re-ranking
+            rerank_request = RerankRequest(query=query, passages=passages)
+            reranked_results = self.reranker.rerank(rerank_request)
+
+            # STEP 4: Format and return top k re-ranked results
+            final_results = []
+            for result in reranked_results[:k]:
+                original_chunk = candidate_chunks[result["id"]]
+                final_results.append(
+                    {
+                        "id": original_chunk["id"],
+                        "text": original_chunk["text"],
+                        "metadata": original_chunk["metadata"],
+                        "distance": original_chunk["distance"],  # Original vector distance
+                        "rerank_score": result["score"],  # FlashRank relevance score
+                    }
+                )
+
+            return final_results
+
+        except Exception as e:
+            # If re-ranking fails, log error and fall back to vector search
+            print(f"⚠ FlashRank re-ranking failed: {e}. Falling back to vector search.")
+            return candidate_chunks[:k]
 
     async def delete_note(self, note_id: str) -> dict[str, Any]:
         """
