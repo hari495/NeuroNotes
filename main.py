@@ -65,10 +65,12 @@ def create_app() -> FastAPI:
 
     # Register API routers
     from app.api.ai_routes import router as ai_router
+    from app.api.chat_routes import router as chat_router
     from app.api.notes_routes import router as notes_router
 
     app.include_router(ai_router, prefix="/api/ai", tags=["AI Services"])
     app.include_router(notes_router, prefix="/api/notes", tags=["Notes & RAG"])
+    app.include_router(chat_router, prefix="/api/chat", tags=["Chat"])
 
     return app
 

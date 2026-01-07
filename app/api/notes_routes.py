@@ -113,7 +113,53 @@ class ListNotesResponse(BaseModel):
     count: int = Field(..., description="Number of notes returned")
 
 
+class CreateNoteRequest(BaseModel):
+    """Simplified request model for creating a note."""
+
+    title: str = Field(
+        ...,
+        description="The title of the note",
+        min_length=1,
+        max_length=500,
+    )
+    text: str = Field(
+        ...,
+        description="The text content of the note",
+        min_length=1,
+        max_length=100000,
+    )
+
+
 # API Endpoints
+@router.post("/", response_model=IngestNoteResponse)
+async def create_note(request: CreateNoteRequest, rag: RAGDep) -> IngestNoteResponse:
+    """
+    Create a new note (simplified endpoint).
+
+    This is a simplified version of /ingest that accepts title and text.
+    The title is automatically added to metadata.
+
+    Args:
+        request: Note creation request with title and text.
+
+    Returns:
+        Information about the created note and chunks.
+    """
+    try:
+        result = await rag.ingest_note(
+            note_text=request.text,
+            metadata={"title": request.title},
+        )
+        return IngestNoteResponse(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create note: {str(e)}",
+        )
+
+
 @router.post("/ingest", response_model=IngestNoteResponse)
 async def ingest_note(request: IngestNoteRequest, rag: RAGDep) -> IngestNoteResponse:
     """

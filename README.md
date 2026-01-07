@@ -9,7 +9,9 @@ This application allows you to store notes locally and query them using natural 
 ### Key Features
 
 - **Local-First**: All data and AI processing happens on your machine
-- **RAG-Powered**: Semantic search and context-aware responses
+- **RAG-Powered**: Semantic search and context-aware responses with source citations
+- **Chat Interface**: Beautiful Streamlit web UI for chatting with your notes
+- **REST API**: Full FastAPI backend with OpenAPI documentation
 - **Modular Architecture**: Strategy pattern for easy provider switching
 - **Type-Safe**: Full type hints and Pydantic validation
 - **Async-First**: Asynchronous FastAPI for high performance
@@ -111,11 +113,28 @@ The API will be available at `http://localhost:8000`
 - API Documentation: `http://localhost:8000/docs`
 - Health Check: `http://localhost:8000/health`
 
-### Start the Streamlit frontend (coming soon)
+### Start the Streamlit Web Interface
+
+**Make sure the FastAPI backend is running first!**
 
 ```bash
+# Option 1: Using the launch script
+./run_streamlit.sh
+
+# Option 2: Direct command
 streamlit run app/frontend.py
 ```
+
+The web interface will open automatically at `http://localhost:8501`
+
+**Features:**
+- 📝 Create and manage notes via sidebar
+- 💬 Chat with your notes using RAG
+- 📚 View sources and citations for each answer
+- ⚙️ Adjust search parameters (k chunks, show sources)
+- 📊 Real-time collection statistics
+
+See `STREAMLIT_GUIDE.md` for detailed usage instructions.
 
 ## Architecture
 
@@ -176,13 +195,28 @@ ruff check .
 mypy app/
 ```
 
-## Next Steps
+## What You Can Do Now
 
-1. Implement Ollama service classes (`OllamaLLM` and `OllamaEmbedding`)
-2. Set up ChromaDB integration
-3. Create API endpoints for notes CRUD operations
-4. Implement RAG retrieval and generation logic
-5. Build Streamlit frontend interface
+The RAG Notes App is fully functional! Here's what you can build with it:
+
+### Current Features (Complete ✅)
+1. ✅ Create and manage notes via API or Streamlit UI
+2. ✅ Chat with your notes using RAG-augmented LLM
+3. ✅ View sources and citations for each answer
+4. ✅ Semantic search across all your notes
+5. ✅ Persistent storage with ChromaDB
+6. ✅ Full REST API with OpenAPI docs
+7. ✅ Beautiful web interface with Streamlit
+
+### Possible Enhancements
+1. **Multi-user support** - Add authentication and user isolation
+2. **Advanced chunking** - Implement smart paragraph/sentence splitting
+3. **Hybrid search** - Combine semantic + keyword search
+4. **Conversation memory** - Multi-turn dialogs with context
+5. **Export/Import** - Backup and restore notes
+6. **Mobile app** - Build React Native or Flutter frontend
+7. **Cloud deployment** - Deploy to AWS/GCP/Azure
+8. **Provider migration** - Switch to Anthropic API for LLM/embeddings
 
 ## License
 
