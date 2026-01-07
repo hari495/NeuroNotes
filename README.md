@@ -10,7 +10,8 @@ This application allows you to store notes locally and query them using natural 
 
 - **Local-First**: All data and AI processing happens on your machine
 - **RAG-Powered**: Semantic search and context-aware responses with source citations
-- **Chat Interface**: Beautiful Streamlit web UI for chatting with your notes
+- **Modern React UI**: Professional two-column interface with IndexedDB storage
+- **File Upload**: Support for .txt, .md, and .pdf files
 - **REST API**: Full FastAPI backend with OpenAPI documentation
 - **Modular Architecture**: Strategy pattern for easy provider switching
 - **Type-Safe**: Full type hints and Pydantic validation
@@ -98,7 +99,23 @@ ollama pull nomic-embed-text:latest
 
 ## Running the Application
 
-### Start the FastAPI backend
+### Quick Start (Recommended)
+
+Run both frontend and backend with a single command:
+
+```bash
+./run_dev.sh
+```
+
+This will start:
+- FastAPI backend on `http://localhost:8000`
+- React frontend on `http://localhost:5173`
+
+Press `Ctrl+C` to stop both services.
+
+### Manual Start
+
+#### 1. Start the FastAPI Backend
 
 ```bash
 python main.py
@@ -109,32 +126,35 @@ Or using uvicorn directly:
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-The API will be available at `http://localhost:8000`
+The API will be available at:
+- API: `http://localhost:8000`
 - API Documentation: `http://localhost:8000/docs`
 - Health Check: `http://localhost:8000/health`
 
-### Start the Streamlit Web Interface
+#### 2. Start the React Frontend
 
 **Make sure the FastAPI backend is running first!**
 
 ```bash
-# Option 1: Using the launch script
-./run_streamlit.sh
-
-# Option 2: Direct command
-streamlit run app/frontend.py
+cd frontend
+npm install  # First time only
+npm run dev
 ```
 
-The web interface will open automatically at `http://localhost:8501`
+The frontend will be available at `http://localhost:5173`
 
 **Features:**
-- 📝 Create and manage notes via sidebar
+- 📚 Local-first note storage with IndexedDB
+- 📤 File upload (.txt, .md, .pdf)
 - 💬 Chat with your notes using RAG
-- 📚 View sources and citations for each answer
-- ⚙️ Adjust search parameters (k chunks, show sources)
-- 📊 Real-time collection statistics
+- 📊 Source citations with note titles (not just "Context 1, 2, 3")
+- 🎨 Modern, responsive two-column UI
+- 🔢 LaTeX math rendering with automatic PDF artifact cleanup
+- ✨ AI automatically converts poorly parsed math symbols to proper LaTeX
 
-See `STREAMLIT_GUIDE.md` for detailed usage instructions.
+**Note on PDFs**: The system automatically converts common PDF parsing artifacts (like `#v` or `#e1`) to proper LaTeX notation ($\vec{v}$, $\vec{e_1}$). See `PDF_MATH_HANDLING.md` for details.
+
+See `frontend/README.md` for detailed frontend documentation.
 
 ## Architecture
 
@@ -200,13 +220,15 @@ mypy app/
 The RAG Notes App is fully functional! Here's what you can build with it:
 
 ### Current Features (Complete ✅)
-1. ✅ Create and manage notes via API or Streamlit UI
-2. ✅ Chat with your notes using RAG-augmented LLM
-3. ✅ View sources and citations for each answer
-4. ✅ Semantic search across all your notes
-5. ✅ Persistent storage with ChromaDB
-6. ✅ Full REST API with OpenAPI docs
-7. ✅ Beautiful web interface with Streamlit
+1. ✅ Upload and manage notes (.txt, .md, .pdf files)
+2. ✅ Local-first storage with IndexedDB in the browser
+3. ✅ Chat with your notes using RAG-augmented LLM
+4. ✅ View sources and citations for each answer
+5. ✅ Semantic search across all your notes
+6. ✅ Persistent vector storage with ChromaDB
+7. ✅ Full REST API with OpenAPI docs
+8. ✅ Modern React UI with two-column layout
+9. ✅ File parsing for multiple formats
 
 ### Possible Enhancements
 1. **Multi-user support** - Add authentication and user isolation

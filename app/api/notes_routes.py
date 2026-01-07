@@ -7,10 +7,16 @@ including ingestion, querying, and deletion.
 
 from typing import Any, List
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel, Field
 
 from app.dependencies import RAGDep
+from app.utils.file_parser import (
+    parse_uploaded_file,
+    parse_multiple_files,
+    FileParseError,
+    SUPPORTED_EXTENSIONS,
+)
 
 
 router = APIRouter()
@@ -309,3 +315,187 @@ async def reset_collection(rag: RAGDep) -> dict[str, str]:
             status_code=500,
             detail=f"Failed to reset collection: {str(e)}",
         )
+
+
+# File Upload Endpoints
+class FileUploadResponse(BaseModel):
+    """Response model for file upload."""
+
+    note_id: str = Field(..., description="Unique ID of the ingested note")
+    filename: str = Field(..., description="Original filename")
+    file_type: str = Field(..., description="File extension")
+    chunks_created: int = Field(..., description="Number of chunks created")
+    total_characters: int = Field(..., description="Total character count")
+    file_size: int = Field(..., description="Original file size in bytes")
+
+
+class BatchFileUploadResponse(BaseModel):
+    """Response model for batch file upload."""
+
+    success_count: int = Field(..., description="Number of files successfully processed")
+    failed_count: int = Field(..., description="Number of files that failed")
+    results: List[FileUploadResponse] = Field(..., description="Results for each file")
+    errors: List[str] = Field(default_factory=list, description="Error messages if any")
+
+
+@router.post("/upload", response_model=FileUploadResponse)
+async def upload_file(
+    file: UploadFile = File(..., description="File to upload (.txt, .md, or .pdf)"),
+    rag: RAGDep = RAGDep,
+) -> FileUploadResponse:
+    """
+    Upload a file and ingest it as a note.
+
+    Supported file types:
+    - .txt (plain text)
+    - .md (markdown)
+    - .pdf (PDF documents)
+
+    The file will be parsed, chunked, and indexed for semantic search.
+    The filename (without extension) will be used as the note title.
+
+    Args:
+        file: The uploaded file.
+
+    Returns:
+        Information about the ingested file and created chunks.
+    """
+    try:
+        # Parse the uploaded file
+        parsed_data = await parse_uploaded_file(file)
+
+        # Extract filename without extension for title
+        from pathlib import Path
+
+        title = Path(parsed_data["filename"]).stem
+
+        # Ingest the note
+        result = await rag.ingest_note(
+            note_text=parsed_data["text"],
+            metadata={
+                "title": title,
+                "filename": parsed_data["filename"],
+                "file_type": parsed_data["file_type"],
+                "source": "file_upload",
+            },
+        )
+
+        return FileUploadResponse(
+            note_id=result["note_id"],
+            filename=parsed_data["filename"],
+            file_type=parsed_data["file_type"],
+            chunks_created=result["chunks_created"],
+            total_characters=result["total_characters"],
+            file_size=parsed_data["size"],
+        )
+
+    except FileParseError as e:
+        raise HTTPException(status_code=400, detail=f"File parsing error: {str(e)}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to upload file: {str(e)}",
+        )
+
+
+@router.post("/upload/batch", response_model=BatchFileUploadResponse)
+async def upload_files_batch(
+    files: List[UploadFile] = File(
+        ..., description="Multiple files to upload (.txt, .md, or .pdf)"
+    ),
+    rag: RAGDep = RAGDep,
+) -> BatchFileUploadResponse:
+    """
+    Upload multiple files at once and ingest them as notes.
+
+    This endpoint processes multiple files in a batch. If some files fail,
+    the successful ones will still be ingested.
+
+    Supported file types:
+    - .txt (plain text)
+    - .md (markdown)
+    - .pdf (PDF documents)
+
+    Args:
+        files: List of files to upload.
+
+    Returns:
+        Batch processing results with success/failure counts and details.
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    if len(files) > 50:
+        raise HTTPException(
+            status_code=400, detail="Too many files. Maximum 50 files per batch."
+        )
+
+    results: List[FileUploadResponse] = []
+    errors: List[str] = []
+
+    # Process each file
+    for file in files:
+        try:
+            # Parse the file
+            parsed_data = await parse_uploaded_file(file)
+
+            # Extract filename without extension for title
+            from pathlib import Path
+
+            title = Path(parsed_data["filename"]).stem
+
+            # Ingest the note
+            result = await rag.ingest_note(
+                note_text=parsed_data["text"],
+                metadata={
+                    "title": title,
+                    "filename": parsed_data["filename"],
+                    "file_type": parsed_data["file_type"],
+                    "source": "file_upload_batch",
+                },
+            )
+
+            results.append(
+                FileUploadResponse(
+                    note_id=result["note_id"],
+                    filename=parsed_data["filename"],
+                    file_type=parsed_data["file_type"],
+                    chunks_created=result["chunks_created"],
+                    total_characters=result["total_characters"],
+                    file_size=parsed_data["size"],
+                )
+            )
+
+        except FileParseError as e:
+            errors.append(f"{file.filename}: File parsing error - {str(e)}")
+        except ValueError as e:
+            errors.append(f"{file.filename}: Validation error - {str(e)}")
+        except Exception as e:
+            errors.append(f"{file.filename}: Unexpected error - {str(e)}")
+
+    return BatchFileUploadResponse(
+        success_count=len(results),
+        failed_count=len(errors),
+        results=results,
+        errors=errors,
+    )
+
+
+@router.get("/upload/supported-types")
+async def get_supported_file_types() -> dict[str, List[str]]:
+    """
+    Get the list of supported file types for upload.
+
+    Returns:
+        Dictionary with supported file extensions.
+    """
+    return {
+        "supported_extensions": list(SUPPORTED_EXTENSIONS),
+        "description": {
+            ".txt": "Plain text files",
+            ".md": "Markdown files",
+            ".pdf": "PDF documents",
+        },
+    }

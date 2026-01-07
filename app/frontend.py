@@ -150,6 +150,57 @@ def list_notes(limit: int = 100) -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
+def upload_file(file_data: bytes, filename: str) -> Dict[str, Any]:
+    """
+    Upload a file via the API.
+
+    Args:
+        file_data: File content as bytes
+        filename: Original filename
+
+    Returns:
+        API response dict
+    """
+    try:
+        files = {"file": (filename, file_data)}
+        response = httpx.post(
+            f"{API_BASE_URL}/api/notes/upload",
+            files=files,
+            timeout=60.0,
+        )
+        response.raise_for_status()
+        return {"success": True, "data": response.json()}
+    except httpx.HTTPStatusError as e:
+        return {"success": False, "error": f"HTTP {e.response.status_code}: {e.response.text}"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def upload_files_batch(files_data: List[tuple[bytes, str]]) -> Dict[str, Any]:
+    """
+    Upload multiple files via the API.
+
+    Args:
+        files_data: List of (file_bytes, filename) tuples
+
+    Returns:
+        API response dict
+    """
+    try:
+        files = [("files", (filename, data)) for data, filename in files_data]
+        response = httpx.post(
+            f"{API_BASE_URL}/api/notes/upload/batch",
+            files=files,
+            timeout=120.0,
+        )
+        response.raise_for_status()
+        return {"success": True, "data": response.json()}
+    except httpx.HTTPStatusError as e:
+        return {"success": False, "error": f"HTTP {e.response.status_code}: {e.response.text}"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 # Sidebar - Note Creation
 st.sidebar.title("📝 Create New Note")
 
@@ -202,6 +253,63 @@ with st.sidebar:
                         st.session_state.notes_count = (
                             st.session_state.notes_count + 1
                         )
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Error: {result['error']}")
+
+    # File upload section
+    st.markdown("---")
+    st.subheader("📤 Upload Files")
+
+    uploaded_files = st.file_uploader(
+        "Upload notes from files",
+        type=["txt", "md", "pdf"],
+        accept_multiple_files=True,
+        help="Upload .txt, .md, or .pdf files to add to your knowledge base",
+        key="file_uploader",
+    )
+
+    if uploaded_files:
+        if st.button("📤 Upload All Files", use_container_width=True):
+            with st.spinner(f"Uploading {len(uploaded_files)} file(s)..."):
+                if len(uploaded_files) == 1:
+                    # Single file upload
+                    file = uploaded_files[0]
+                    file_data = file.read()
+                    result = upload_file(file_data, file.name)
+
+                    if result["success"]:
+                        data = result["data"]
+                        st.success(f"✅ File uploaded: {data['filename']}")
+                        st.info(
+                            f"📊 Created {data['chunks_created']} chunks "
+                            f"from {data['total_characters']} characters"
+                        )
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Error: {result['error']}")
+                else:
+                    # Batch upload
+                    files_data = [(f.read(), f.name) for f in uploaded_files]
+                    result = upload_files_batch(files_data)
+
+                    if result["success"]:
+                        data = result["data"]
+                        st.success(
+                            f"✅ Uploaded {data['success_count']} of {len(uploaded_files)} files"
+                        )
+
+                        if data["failed_count"] > 0:
+                            st.warning(f"⚠️ {data['failed_count']} file(s) failed")
+                            with st.expander("View errors"):
+                                for error in data["errors"]:
+                                    st.error(error)
+
+                        # Show summary
+                        total_chunks = sum(
+                            r["chunks_created"] for r in data["results"]
+                        )
+                        st.info(f"📊 Total chunks created: {total_chunks}")
                         st.rerun()
                     else:
                         st.error(f"❌ Error: {result['error']}")
