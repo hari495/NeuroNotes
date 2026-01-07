@@ -63,10 +63,12 @@ def create_app() -> FastAPI:
         """Health check endpoint."""
         return {"status": "healthy", "version": settings.app_version}
 
-    # TODO: Register API routers here
-    # from app.api import notes_router, chat_router
-    # app.include_router(notes_router, prefix="/api/notes", tags=["notes"])
-    # app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
+    # Register API routers
+    from app.api.ai_routes import router as ai_router
+    from app.api.notes_routes import router as notes_router
+
+    app.include_router(ai_router, prefix="/api/ai", tags=["AI Services"])
+    app.include_router(notes_router, prefix="/api/notes", tags=["Notes & RAG"])
 
     return app
 

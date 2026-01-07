@@ -56,8 +56,11 @@ class OllamaLLM(LLMProvider):
                 timeout=self.timeout,
             )
 
-            # Extract the response text
-            if isinstance(response, dict) and "response" in response:
+            # Extract the response text from the response object
+            # The Ollama library returns an object with a 'response' attribute
+            if hasattr(response, "response"):
+                return response.response
+            elif isinstance(response, dict) and "response" in response:
                 return response["response"]
             else:
                 raise ValueError(f"Unexpected response format from Ollama: {response}")
@@ -100,7 +103,9 @@ class OllamaLLM(LLMProvider):
             )
 
             async for chunk in stream:
-                if isinstance(chunk, dict) and "response" in chunk:
+                if hasattr(chunk, "response"):
+                    yield chunk.response
+                elif isinstance(chunk, dict) and "response" in chunk:
                     yield chunk["response"]
 
         except ollama.ResponseError as e:
@@ -124,8 +129,25 @@ class OllamaLLM(LLMProvider):
         """
         try:
             # Try to list models to verify connection
-            models = await self.client.list()
-            model_names = [m["name"] for m in models.get("models", [])]
+            models_response = await self.client.list()
+
+            # Handle both object and dict responses
+            if hasattr(models_response, "models"):
+                models_list = models_response.models
+            elif isinstance(models_response, dict):
+                models_list = models_response.get("models", [])
+            else:
+                return False
+
+            # Extract model names
+            model_names = []
+            for m in models_list:
+                if hasattr(m, "model"):
+                    model_names.append(m.model)
+                elif hasattr(m, "name"):
+                    model_names.append(m.name)
+                elif isinstance(m, dict):
+                    model_names.append(m.get("model", m.get("name", "")))
 
             # Check if our configured model is available
             return any(self.model in name for name in model_names)
@@ -175,19 +197,22 @@ class OllamaEmbedding(EmbeddingProvider):
                 timeout=self.timeout,
             )
 
-            # Extract the embedding vector
-            if isinstance(response, dict) and "embedding" in response:
+            # Extract the embedding vector from the response object
+            # The Ollama library returns an object with an 'embedding' attribute
+            if hasattr(response, "embedding"):
+                embedding = response.embedding
+            elif isinstance(response, dict) and "embedding" in response:
                 embedding = response["embedding"]
-
-                # Cache the dimension on first call
-                if self._dimension is None:
-                    self._dimension = len(embedding)
-
-                return embedding
             else:
                 raise ValueError(
                     f"Unexpected response format from Ollama: {response}"
                 )
+
+            # Cache the dimension on first call
+            if self._dimension is None:
+                self._dimension = len(embedding)
+
+            return embedding
 
         except asyncio.TimeoutError:
             raise Exception(
@@ -265,8 +290,25 @@ class OllamaEmbedding(EmbeddingProvider):
         """
         try:
             # Try to list models to verify connection
-            models = await self.client.list()
-            model_names = [m["name"] for m in models.get("models", [])]
+            models_response = await self.client.list()
+
+            # Handle both object and dict responses
+            if hasattr(models_response, "models"):
+                models_list = models_response.models
+            elif isinstance(models_response, dict):
+                models_list = models_response.get("models", [])
+            else:
+                return False
+
+            # Extract model names
+            model_names = []
+            for m in models_list:
+                if hasattr(m, "model"):
+                    model_names.append(m.model)
+                elif hasattr(m, "name"):
+                    model_names.append(m.name)
+                elif isinstance(m, dict):
+                    model_names.append(m.get("model", m.get("name", "")))
 
             # Check if our configured embedding model is available
             return any(self.model in name for name in model_names)
