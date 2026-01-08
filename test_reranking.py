@@ -77,5 +77,110 @@ async def test_reranking():
         traceback.print_exc()
 
 
+async def test_context_expansion():
+    """Test that query_notes returns expanded context."""
+    print("=" * 70)
+    print("Context Expansion Integration Test")
+    print("=" * 70)
+
+    # Initialize services
+    print("\n1. Initializing services...")
+    settings = Settings()
+    embedding_service = OllamaEmbedding(settings)
+    rag_service = RAGService(settings, embedding_service)
+    print(f"   ✓ RAG Service initialized")
+
+    # Create a multi-chunk document
+    print("\n2. Creating test document...")
+    note_text = (
+        "Chapter 1: Introduction to Linear Algebra\n" +
+        "This is the first chapter. " * 50 +  # ~200 words to ensure chunking
+        "\n\n" +
+        "Chapter 2: Vectors and Vector Spaces\n" +
+        "This chapter discusses vectors. " * 50 +  # Another chunk
+        "\n\n" +
+        "Chapter 3: Matrix Operations\n" +
+        "This chapter covers matrices. " * 50  # Another chunk
+    )
+
+    try:
+        # Ingest the test document
+        print("   - Ingesting test document...")
+        result = await rag_service.ingest_note(
+            note_text,
+            metadata={"title": "Linear Algebra Test", "author": "Test Suite"}
+        )
+        print(f"   ✓ Document ingested: {result['chunks_created']} chunks created")
+        note_id = result['note_id']
+
+        # Query for content that should match middle chunks
+        print("\n3. Querying for 'Chapter 2: Vectors'...")
+        query = "Chapter 2 Vectors"
+        results = await rag_service.query_notes(query=query, k=1)
+
+        print(f"\n4. Verifying context expansion:")
+        print("-" * 70)
+
+        if not results:
+            print("   ✗ No results returned")
+            return
+
+        result = results[0]
+        print(f"   - Chunk ID: {result['id']}")
+        print(f"   - Context Expanded: {result['metadata'].get('context_expanded', False)}")
+
+        # Verify expansion occurred
+        if result['metadata'].get('context_expanded'):
+            print("   ✓ Context expansion is working!")
+
+            # Check for section delimiters
+            text = result['text']
+            has_main = "[Main Match]" in text
+            has_prev = "[Previous Context]" in text
+            has_next = "[Next Context]" in text
+
+            print(f"   - Has [Main Match]: {has_main}")
+            print(f"   - Has [Previous Context]: {has_prev}")
+            print(f"   - Has [Next Context]: {has_next}")
+
+            # Verify metadata fields
+            assert 'original_text' in result['metadata'], "Missing original_text in metadata"
+            assert 'expansion_info' in result['metadata'], "Missing expansion_info in metadata"
+
+            expansion_info = result['metadata']['expansion_info']
+            print(f"   - Has previous chunk: {expansion_info.get('has_previous', False)}")
+            print(f"   - Has next chunk: {expansion_info.get('has_next', False)}")
+            print(f"   - Previous chunk ID: {expansion_info.get('previous_chunk_id', 'None')}")
+            print(f"   - Next chunk ID: {expansion_info.get('next_chunk_id', 'None')}")
+
+            # Show text preview
+            print(f"\n   Text preview (first 300 chars):")
+            print(f"   {text[:300]}...")
+
+            print("\n" + "=" * 70)
+            print("✓ Context expansion test completed successfully!")
+            print("=" * 70)
+        else:
+            print("   ✗ Context expansion did not occur")
+            print(f"   - Text: {result['text'][:200]}...")
+
+        # Cleanup: Delete the test document
+        print("\n5. Cleaning up test document...")
+        await rag_service.delete_note(note_id)
+        print(f"   ✓ Test document deleted")
+
+    except Exception as e:
+        print(f"\n✗ Error during testing: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+async def run_all_tests():
+    """Run all tests."""
+    await test_reranking()
+    print("\n\n")
+    await test_context_expansion()
+
+
 if __name__ == "__main__":
-    asyncio.run(test_reranking())
+    asyncio.run(run_all_tests())

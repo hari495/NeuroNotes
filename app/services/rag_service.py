@@ -364,16 +364,24 @@ class RAGService:
         filter_metadata: dict[str, Any] | None = None,
     ) -> List[dict[str, Any]]:
         """
-        Query the RAG system for relevant note chunks with re-ranking.
+        Query the RAG system for relevant note chunks with re-ranking and context expansion.
 
-        This function implements a two-stage retrieval strategy for improved accuracy:
+        This function implements a multi-stage retrieval strategy for improved accuracy:
         1. Generates an embedding for the query
         2. Performs semantic search in ChromaDB to retrieve 50 candidate chunks (high recall)
         3. Uses FlashRank to re-score and re-rank the candidates against the query
         4. Returns the top k most relevant chunks (high precision)
+        5. Expands context by fetching neighboring chunks (±1 chunk) for each result
 
-        This approach allows deep search across all 968+ chunks while only sending
-        the highest-quality, most relevant chunks to the LLM.
+        Context Expansion:
+            - For each top-k chunk, fetches the previous chunk (chunk_index - 1) and
+              next chunk (chunk_index + 1) if they exist
+            - Merges them as: [Previous Context] + [Main Match] + [Next Context]
+            - Handles edge cases: first chunk (no previous), last chunk (no next)
+            - Performance: Single batched ChromaDB query for all neighbors
+
+        This approach allows deep search across all chunks while providing rich
+        surrounding context to the LLM for better understanding.
 
         Args:
             query: The search query text.
@@ -383,8 +391,11 @@ class RAGService:
         Returns:
             List of dictionaries containing:
             - id: Chunk ID
-            - text: Chunk text content
-            - metadata: Chunk metadata
+            - text: EXPANDED chunk text with neighboring context
+            - metadata: Chunk metadata with additional fields:
+                - context_expanded: bool (True if expansion applied)
+                - original_text: str (original text before expansion)
+                - expansion_info: dict (neighbor information)
             - distance: Similarity distance (lower = more similar, from ChromaDB)
             - rerank_score: Re-ranking score (higher = more relevant, only if re-ranker available)
 
@@ -429,8 +440,9 @@ class RAGService:
             return []
 
         if not self.reranker_available or self.reranker is None:
-            # Fallback: return top k from vector search
-            return candidate_chunks[:k]
+            # Fallback: return top k from vector search with context expansion
+            expanded_results = self._expand_context(candidate_chunks[:k])
+            return expanded_results
 
         # STEP 3: Re-rank using FlashRank for improved relevance
         try:
@@ -466,12 +478,136 @@ class RAGService:
                     }
                 )
 
-            return final_results
+            # STEP 5: Apply context expansion
+            expanded_results = self._expand_context(final_results)
+            return expanded_results
 
         except Exception as e:
             # If re-ranking fails, log error and fall back to vector search
             print(f"⚠ FlashRank re-ranking failed: {e}. Falling back to vector search.")
-            return candidate_chunks[:k]
+            expanded_results = self._expand_context(candidate_chunks[:k])
+            return expanded_results
+
+    def _expand_context(self, chunks: List[dict[str, Any]]) -> List[dict[str, Any]]:
+        """
+        Expand context by fetching neighboring chunks for each result.
+
+        For each chunk, fetches the previous chunk (chunk_index - 1) and next chunk
+        (chunk_index + 1) if they exist, then merges them into a single expanded context.
+
+        Args:
+            chunks: List of chunk dictionaries with 'id', 'text', 'metadata', etc.
+
+        Returns:
+            List of chunks with expanded text in the 'text' field and additional metadata:
+            - context_expanded: bool (True if expansion was applied)
+            - original_text: str (original chunk text before expansion)
+            - expansion_info: dict (details about which chunks were added)
+
+        Edge Cases Handled:
+            - First chunk (index=0): No previous chunk, only add next
+            - Last chunk (index=total_chunks-1): No next chunk, only add previous
+            - Single chunk document: No neighbors, return as-is
+            - Missing metadata: Return chunk without expansion
+            - ChromaDB fetch failure: Log warning and return original chunk
+        """
+        if not chunks:
+            return chunks
+
+        # Step 1: Collect all neighbor IDs for batch fetching
+        neighbor_requests = []  # List of (chunk_idx, prev_id, next_id)
+        all_neighbor_ids = []
+
+        for idx, chunk in enumerate(chunks):
+            metadata = chunk.get('metadata', {})
+            note_id = metadata.get('note_id')
+            chunk_index = metadata.get('chunk_index')
+            total_chunks = metadata.get('total_chunks')
+
+            # Validate metadata
+            if not all([note_id is not None, chunk_index is not None, total_chunks is not None]):
+                print(f"⚠ Chunk {chunk.get('id')} missing required metadata for expansion. Skipping.")
+                neighbor_requests.append((idx, None, None))
+                continue
+
+            # Calculate neighbor IDs
+            prev_id = f"{note_id}_chunk_{chunk_index - 1}" if chunk_index > 0 else None
+            next_id = f"{note_id}_chunk_{chunk_index + 1}" if chunk_index < total_chunks - 1 else None
+
+            neighbor_requests.append((idx, prev_id, next_id))
+
+            if prev_id:
+                all_neighbor_ids.append(prev_id)
+            if next_id:
+                all_neighbor_ids.append(next_id)
+
+        # Step 2: Batch fetch all neighbors in a single query
+        neighbor_map = {}
+        if all_neighbor_ids:
+            try:
+                neighbor_results = self.collection.get(
+                    ids=all_neighbor_ids,
+                    include=["documents"]
+                )
+
+                # Build lookup map
+                if neighbor_results and neighbor_results.get('ids'):
+                    neighbor_map = {
+                        chunk_id: doc
+                        for chunk_id, doc in zip(neighbor_results['ids'], neighbor_results['documents'])
+                    }
+            except Exception as e:
+                print(f"⚠ Context expansion failed during ChromaDB fetch: {e}")
+                print("   Returning original chunks without expansion.")
+                return chunks
+
+        # Step 3: Expand each chunk
+        expanded_chunks = []
+
+        for chunk_idx, prev_id, next_id in neighbor_requests:
+            chunk = chunks[chunk_idx]
+
+            # If metadata was invalid, return chunk as-is
+            if prev_id is None and next_id is None and chunk.get('metadata', {}).get('chunk_index') is None:
+                chunk_copy = chunk.copy()
+                chunk_copy['metadata'] = chunk.get('metadata', {}).copy()
+                chunk_copy['metadata']['context_expanded'] = False
+                expanded_chunks.append(chunk_copy)
+                continue
+
+            # Fetch neighbor texts
+            prev_text = neighbor_map.get(prev_id) if prev_id else None
+            next_text = neighbor_map.get(next_id) if next_id else None
+
+            # Build expanded text
+            expanded_sections = []
+
+            if prev_text:
+                expanded_sections.append("[Previous Context]\n" + prev_text)
+
+            expanded_sections.append("[Main Match]\n" + chunk['text'])
+
+            if next_text:
+                expanded_sections.append("[Next Context]\n" + next_text)
+
+            expanded_text = "\n\n".join(expanded_sections)
+
+            # Create expanded chunk
+            expanded_chunk = chunk.copy()
+            expanded_chunk['metadata'] = chunk.get('metadata', {}).copy()
+            expanded_chunk['text'] = expanded_text
+            expanded_chunk['metadata']['context_expanded'] = True
+            expanded_chunk['metadata']['original_text'] = chunk['text']
+            expanded_chunk['metadata']['expansion_info'] = {
+                'has_previous': prev_text is not None,
+                'has_next': next_text is not None,
+                'previous_chunk_id': prev_id,
+                'next_chunk_id': next_id,
+            }
+
+            expanded_chunks.append(expanded_chunk)
+
+        return expanded_chunks
 
     async def delete_note(self, note_id: str) -> dict[str, Any]:
         """

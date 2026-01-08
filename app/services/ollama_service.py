@@ -60,7 +60,7 @@ CRITICAL INSTRUCTIONS:
 
 REQUIRED RESPONSE STRUCTURE:
 Your response MUST follow this exact structure:
-
+Connect the retrieved information... Use specific phrases from the source text to ground your explanation, then expand on them using examples.
 ## Core Concept
 [Provide a concise 2-3 sentence summary of the fundamental idea or main point]
 
