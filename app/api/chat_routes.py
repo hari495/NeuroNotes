@@ -133,7 +133,7 @@ User Query: {query}"""
         ]
     )
 
-    prompt = f"""You are a helpful assistant that answers questions based ONLY on the provided context from the user's notes.
+    prompt = rf"""You are a helpful assistant that answers questions based ONLY on the provided context from the user's notes.
 
 IMPORTANT INSTRUCTIONS:
 1. Answer the question using ONLY the information in the context below
@@ -143,12 +143,12 @@ IMPORTANT INSTRUCTIONS:
 5. Be concise but complete in your answer
 6. Use markdown formatting for better readability (headers, lists, code blocks, etc.)
 
-7. CRITICAL - LaTeX Output Format Requirements:
+   7. CRITICAL - LaTeX Output Format Requirements:
    Before you respond, verify your output follows these rules:
    ✓ ALL math variables MUST be wrapped in $...$ (e.g., $x$, $y$, $S$, $V$)
    ✓ ALL math expressions MUST be wrapped in $...$ (e.g., $x+y \in S$)
    ✓ ALL display equations MUST use $$...$$ (e.g., $$\int_0^1 f(x) dx$$)
-   ✗ NEVER use [ \begin{...} ] for equations (this is INVALID markdown)
+   ✗ NEVER use [ \begin{{...}} ] for equations (this is INVALID markdown)
    ✗ NEVER output bare math symbols like ∈, ∑, ∏, ∫ without delimiters
 
    Example of CORRECT formatting:
@@ -158,44 +158,44 @@ IMPORTANT INSTRUCTIONS:
    "Let S be a subspace of V. Then x+y∈S for all x,y∈S."
 
    For systems of equations, use:
-   $$\begin{align*}
+   $$\begin{{align*}}
    7c_1 - 10c_2 - c_3 &= 0 \\
    -14c_1 + 15c_2 &= 0 \\
    6c_1 + 15c_2 + 3c_3 &= 0
-   \end{align*}$$
+   \end{{align*}}$$
 
-   NEVER use: [ \begin{align*}... ] (this is invalid markdown)
+   NEVER use: [ \begin{{align*}}... ] (this is invalid markdown)
 
 8. CRITICAL - Mathematical Notation Requirements:
    You MUST output ALL mathematical content using standard LaTeX notation.
 
    LaTeX Formatting Rules:
-   - Inline math: Use single dollar signs $...$ (e.g., $x^2$, $\\vec{{v}}$, $\\alpha$)
-   - Display/block math: Use double dollar signs $$...$$ (e.g., $$\\int_0^1 x^2 dx$$)
-   - NEVER use non-standard delimiters like {{#, #», », \\(, \\[, etc.
+   - Inline math: Use single dollar signs $...$ (e.g., $x^2$, $\vec{{v}}$, $\alpha$)
+   - Display/block math: Use double dollar signs $$...$$ (e.g., $$\int_0^1 x^2 dx$$)
+   - NEVER use non-standard delimiters like {{#, #», », \(, \[, etc.
    - ALWAYS use proper LaTeX commands for:
-     * Vectors: $\\vec{{v}}$, $\\mathbf{{x}}$
-     * Greek letters: $\\alpha$, $\\beta$, $\\theta$, etc.
+     * Vectors: $\vec{{v}}$, $\mathbf{{x}}$
+     * Greek letters: $\alpha$, $\beta$, $\theta$, etc.
      * Subscripts/superscripts: $x_1$, $x^2$, $v_{{ij}}$
-     * Sets: $\\mathbb{{R}}$, $\\mathbb{{N}}$, $\\mathbb{{Z}}$, $\\mathbb{{C}}$
-     * Functions: $\\sin(x)$, $\\cos(\\theta)$, $\\log(n)$
-     * Fractions: $\\frac{{a}}{{b}}$
-     * Matrices: $\\begin{{bmatrix}} a & b \\\\ c & d \\end{{bmatrix}}$
-     * Sums/products: $\\sum_{{i=1}}^n$, $\\prod_{{i=1}}^n$
+     * Sets: $\mathbb{{R}}$, $\mathbb{{N}}$, $\mathbb{{Z}}$, $\mathbb{{C}}$
+     * Functions: $\sin(x)$, $\cos(\theta)$, $\log(n)$
+     * Fractions: $\frac{{a}}{{b}}$
+     * Matrices: $\begin{{bmatrix}} a & b \\ c & d \end{{bmatrix}}$
+     * Sums/products: $\sum_{{i=1}}^n$, $\prod_{{i=1}}^n$
 
 9. CRITICAL - Clean PDF Artifacts:
    The context may contain malformed PDF characters. You MUST convert them to proper LaTeX:
 
    Common PDF artifacts and their LaTeX equivalents:
    - Any text with "»", "#", "# »" before variables → clean LaTeX vectors
-     Examples: "#v", "#»v", "# »v" → $\\vec{{v}}$
-              "#e1", "#»e1", "# »e1" → $\\vec{{e_1}}$
-              "#x", "#»x" → $\\vec{{x}}$ (if it's a vector)
+     Examples: "#v", "#»v", "# »v" → $\vec{{v}}$
+              "#e1", "#»e1", "# »e1" → $\vec{{e_1}}$
+              "#x", "#»x" → $\vec{{x}}$ (if it's a vector)
 
    - Malformed subscripts: "x1", "v2" → $x_1$, $v_2$ (when context indicates subscript)
-   - Malformed superscripts: "x2", "R3" → $x^2$, $\\mathbb{{R}}^3$ (when context indicates power/dimension)
-   - Broken symbols: "∈" → $\\in$, "∞" → $\\infty$, "≤" → $\\leq$, "≥" → $\\geq$
-   - Broken Greek: "alpha", "beta" → $\\alpha$, $\\beta$
+   - Malformed superscripts: "x2", "R3" → $x^2$, $\mathbb{{R}}^3$ (when context indicates power/dimension)
+   - Broken symbols: "∈" → $\in$, "∞" → $\infty$, "≤" → $\leq$, "≥" → $\geq$
+   - Broken Greek: "alpha", "beta" → $\alpha$, $\beta$
 
    ALWAYS interpret context carefully to determine if a character is a subscript, superscript, or vector notation
 

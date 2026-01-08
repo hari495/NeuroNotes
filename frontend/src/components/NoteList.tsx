@@ -12,7 +12,6 @@ import {
   generateNoteId,
   extractTitleFromFilename,
   formatTimestamp,
-  truncateText,
 } from '../utils/fileReader';
 import type { Note, UploadStatus } from '../types/note';
 import './NoteList.css';
@@ -192,7 +191,6 @@ function NoteList({ onNoteSelect }: NoteListProps) {
                   🗑️
                 </button>
               </div>
-              <p className="note-preview">{truncateText(note.content, 80)}</p>
               <div className="note-meta">
                 <span className="note-date">{formatTimestamp(note.timestamp)}</span>
                 {note.chunksCreated && (
