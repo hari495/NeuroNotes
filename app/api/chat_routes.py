@@ -13,64 +13,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.dependencies import LLMDep, RAGDep
+from app.schemas import ChatRequest, ChatResponse, ContextChunk
 
 
 router = APIRouter()
-
-
-# Request/Response Models
-class ChatRequest(BaseModel):
-    """Request model for chat endpoint."""
-
-    query: str = Field(
-        ...,
-        description="The user's question or query",
-        min_length=1,
-        max_length=2000,
-        examples=["What is machine learning?"],
-    )
-    k: int = Field(
-        default=5,
-        description="Number of context chunks to retrieve from notes (after re-ranking)",
-        ge=1,
-        le=10,
-    )
-    note_id: str | None = Field(
-        default=None,
-        description="Filter by specific note ID (searches only that note)",
-    )
-    filter_metadata: dict[str, Any] | None = Field(
-        default=None,
-        description="Optional metadata filters for context retrieval",
-    )
-    include_sources: bool = Field(
-        default=True,
-        description="Whether to include source information in the response",
-    )
-
-
-class ContextChunk(BaseModel):
-    """Model for a context chunk used in the response."""
-
-    text: str = Field(..., description="The text content of the chunk")
-    metadata: dict[str, Any] = Field(..., description="Metadata about the chunk")
-    distance: float = Field(..., description="Similarity distance (lower = more relevant)")
-
-
-class ChatResponse(BaseModel):
-    """Response model for chat endpoint."""
-
-    query: str = Field(..., description="The user's original query")
-    answer: str = Field(..., description="The LLM-generated answer")
-    context_used: List[ContextChunk] = Field(
-        ...,
-        description="The context chunks used to generate the answer",
-    )
-    num_chunks: int = Field(..., description="Number of context chunks used")
-    has_context: bool = Field(
-        ...,
-        description="Whether any relevant context was found",
-    )
 
 
 class StreamChatRequest(BaseModel):

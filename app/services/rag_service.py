@@ -5,6 +5,7 @@ This module provides the core RAG functionality including document ingestion,
 chunking, embedding, and semantic retrieval using ChromaDB with FlashRank re-ranking.
 """
 
+import logging
 import time
 import uuid
 from typing import Any, List
@@ -15,6 +16,8 @@ from flashrank import Ranker, RerankRequest
 
 from app.core.config import Settings
 from app.core.interfaces import EmbeddingProvider
+
+logger = logging.getLogger(__name__)
 
 
 class RAGService:
@@ -60,9 +63,9 @@ class RAGService:
         try:
             self.reranker = Ranker(model_name="ms-marco-MiniLM-L-12-v2", cache_dir=str(chroma_path / "flashrank"))
             self.reranker_available = True
-            print("✓ FlashRank re-ranker initialized successfully")
+            logger.info("FlashRank re-ranker initialized successfully")
         except Exception as e:
-            print(f"⚠ FlashRank initialization failed: {e}. Falling back to vector search only.")
+            logger.warning(f"FlashRank initialization failed: {e}. Falling back to vector search only.")
             self.reranker = None
             self.reranker_available = False
 
@@ -254,8 +257,8 @@ class RAGService:
             raise ValueError("Text chunking resulted in no chunks")
 
         total_chunks = len(chunks)
-        print(f"📄 Chunking complete: {total_chunks} chunks created")
-        print(f"🔄 Processing in batches of {batch_size}...")
+        logger.info(f"Chunking complete: {total_chunks} chunks created")
+        logger.debug(f"Processing in batches of {batch_size}")
 
         # Track statistics
         successful_chunks = 0
@@ -273,9 +276,9 @@ class RAGService:
 
             try:
                 # Generate embeddings for this batch
-                print(
-                    f"⏳ Processing batch {batch_num}/{total_batches} "
-                    f"(chunks {batch_start + 1}-{batch_end}/{total_chunks})..."
+                logger.debug(
+                    f"Processing batch {batch_num}/{total_batches} "
+                    f"(chunks {batch_start + 1}-{batch_end}/{total_chunks})"
                 )
 
                 embeddings = await self.embedding_provider.get_embeddings_batch(batch_chunks)
@@ -302,8 +305,8 @@ class RAGService:
                 )
 
                 successful_chunks += batch_size_actual
-                print(
-                    f"✓ Batch {batch_num}/{total_batches} completed successfully "
+                logger.debug(
+                    f"Batch {batch_num}/{total_batches} completed successfully "
                     f"({successful_chunks}/{total_chunks} chunks processed)"
                 )
 
@@ -316,24 +319,22 @@ class RAGService:
                 # Log error but continue with next batch
                 failed_chunks += batch_size_actual
                 failed_batches.append(batch_num)
-                print(
-                    f"✗ Batch {batch_num}/{total_batches} failed: {str(e)}"
-                )
-                print(
-                    f"⚠ Continuing to next batch... "
+                logger.error(f"Batch {batch_num}/{total_batches} failed: {str(e)}")
+                logger.warning(
+                    f"Continuing to next batch... "
                     f"({failed_chunks} chunks failed so far)"
                 )
                 continue
 
-        # Print final summary
-        print("\n" + "=" * 60)
-        print(f"📊 Ingestion Summary:")
-        print(f"   Total chunks: {total_chunks}")
-        print(f"   Successful: {successful_chunks} ✓")
-        print(f"   Failed: {failed_chunks} ✗")
+        # Log final summary
+        logger.info("=" * 60)
+        logger.info(f"Ingestion Summary:")
+        logger.info(f"  Total chunks: {total_chunks}")
+        logger.info(f"  Successful: {successful_chunks}")
+        logger.info(f"  Failed: {failed_chunks}")
         if failed_batches:
-            print(f"   Failed batches: {failed_batches}")
-        print("=" * 60 + "\n")
+            logger.info(f"  Failed batches: {failed_batches}")
+        logger.info("=" * 60)
 
         # If all batches failed, raise an exception
         if successful_chunks == 0:
@@ -484,7 +485,7 @@ class RAGService:
 
         except Exception as e:
             # If re-ranking fails, log error and fall back to vector search
-            print(f"⚠ FlashRank re-ranking failed: {e}. Falling back to vector search.")
+            logger.warning(f"FlashRank re-ranking failed: {e}. Falling back to vector search.")
             expanded_results = self._expand_context(candidate_chunks[:k])
             return expanded_results
 
@@ -526,7 +527,7 @@ class RAGService:
 
             # Validate metadata
             if not all([note_id is not None, chunk_index is not None, total_chunks is not None]):
-                print(f"⚠ Chunk {chunk.get('id')} missing required metadata for expansion. Skipping.")
+                logger.warning(f"Chunk {chunk.get('id')} missing required metadata for expansion. Skipping.")
                 neighbor_requests.append((idx, None, None))
                 continue
 
@@ -557,8 +558,8 @@ class RAGService:
                         for chunk_id, doc in zip(neighbor_results['ids'], neighbor_results['documents'])
                     }
             except Exception as e:
-                print(f"⚠ Context expansion failed during ChromaDB fetch: {e}")
-                print("   Returning original chunks without expansion.")
+                logger.warning(f"Context expansion failed during ChromaDB fetch: {e}")
+                logger.warning("Returning original chunks without expansion.")
                 return chunks
 
         # Step 3: Expand each chunk

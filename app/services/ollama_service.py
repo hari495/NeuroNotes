@@ -34,6 +34,26 @@ class OllamaLLM(LLMProvider):
         self.model = settings.ollama_llm_model
         self.timeout = settings.ollama_timeout
 
+    def _extract_response_value(self, response: Any) -> str:
+        """
+        Extract response string from Ollama response object.
+
+        Args:
+            response: Ollama response (object or dict)
+
+        Returns:
+            str: Extracted response text
+
+        Raises:
+            ValueError: If response format is unrecognized
+        """
+        if hasattr(response, "response"):
+            return response.response
+        elif isinstance(response, dict) and "response" in response:
+            return response["response"]
+        else:
+            raise ValueError(f"Unexpected response format from Ollama: {response}")
+
     async def generate_response(self, prompt: str) -> str:
         """
         Generate a text response from the Ollama language model.
@@ -54,27 +74,37 @@ class OllamaLLM(LLMProvider):
         system_prompt = """You are a PhD-level Teaching Assistant. Your goal is not just to answer, but to synthesize information to help the student build a deep mental model.
 
 CRITICAL INSTRUCTIONS:
-1. Do not just list facts. Explain the implications of the facts.
-2. If the context is sparse (like a slide with few words), infer the likely connection between concepts based on standard academic knowledge, but clearly state what is explicit in the text vs. what is inferred.
-3. Connect concepts to build understanding, not just recite information.
+1. **Synthesis over Retrieval:** Do not just list facts. Explain the *implications* of the facts.
+2. **Handle Sparsity:** If the context is sparse (like a slide with few words), infer the likely connection between concepts based on standard academic knowledge.
+3. **Source Grounding:** When making a claim, briefly reference the source text (e.g., "As seen in the definition of rank..."), then expand on it.
+4. **Logical Flow:** Never dump a wall of text. Break complex ideas into their component parts (Definition → Intuition → Application).
+
+FORMATTING STANDARDS:
+- **Math:** ALWAYS use LaTeX formatting for mathematical expressions (e.g., $Ax = b$, $\lambda$).
+- **Emphasis:** Use **bold** for key terms and core concepts.
+- **Lists:** Use bullet points or numbered lists for steps, properties, or conditions.
+- **Sub-headers:** Use `###` headers within the analysis to separate distinct sub-topics.
 
 REQUIRED RESPONSE STRUCTURE:
 Your response MUST follow this exact structure:
-Connect the retrieved information... Use specific phrases from the source text to ground your explanation, then expand on them using examples.
+
 ## Core Concept
-[Provide a concise 2-3 sentence summary of the fundamental idea or main point]
+[Provide a concise 2-3 sentence summary of the fundamental idea. Start with a direct definition, then state its significance.]
 
 ## Detailed Analysis
-[Connect the retrieved information, explain relationships between concepts, discuss implications, and build a coherent narrative. This is where you synthesize and explain, not just list.]
+[This section must be logically structured, not a stream of consciousness.]
+- **Context & Definitions:** Start by defining the terms found in the text.
+- **The "Why" (Intuition):** Explain the logic behind the concept. Why does this theorem hold? Why is this formula constructed this way?
+- **The "How" (Mechanics):** If applicable, explain the steps or conditions required to apply this concept.
+- **Connections:** Explicitly state how this connects to previous chapters or broader linear algebra concepts (e.g., "This generalizes the concept of...").
 
 ## Key Takeaways
-[Provide 3-5 bullet points highlighting the most important insights the student should remember]
+[Provide 3-5 bullet points. Each point should be a complete sentence containing a high-value insight.]
 
 Remember:
-- Distinguish between what is explicitly stated in the context vs. what you are inferring
-- Focus on building understanding, not just providing information
-- Make connections between concepts
-- Explain "why" and "how", not just "what"
+- Distinguish between what is explicitly stated in the context vs. what you are inferring.
+- If the user asks a "How to" question, use numbered steps.
+- If the user asks for a comparison, consider using a Markdown table.
 """
 
         # Construct full prompt with system instruction
@@ -85,18 +115,15 @@ Remember:
                 self.client.generate(
                     model=self.model,
                     prompt=full_prompt,
+                    options={
+                        "num_predict": 2000,  # Increase token limit for longer responses (e.g., flashcards)
+                    },
                 ),
                 timeout=self.timeout,
             )
 
             # Extract the response text from the response object
-            # The Ollama library returns an object with a 'response' attribute
-            if hasattr(response, "response"):
-                return response.response
-            elif isinstance(response, dict) and "response" in response:
-                return response["response"]
-            else:
-                raise ValueError(f"Unexpected response format from Ollama: {response}")
+            return self._extract_response_value(response)
 
         except asyncio.TimeoutError:
             raise Exception(
@@ -136,10 +163,7 @@ Remember:
             )
 
             async for chunk in stream:
-                if hasattr(chunk, "response"):
-                    yield chunk.response
-                elif isinstance(chunk, dict) and "response" in chunk:
-                    yield chunk["response"]
+                yield self._extract_response_value(chunk)
 
         except ollama.ResponseError as e:
             raise Exception(
@@ -153,6 +177,38 @@ Remember:
                 f"Check if Ollama is running at {self.settings.ollama_base_url}"
             )
 
+    async def _get_available_models(self) -> List[str]:
+        """
+        Get list of available model names from Ollama.
+
+        Returns:
+            List of available model names
+
+        Raises:
+            Exception: If unable to retrieve model list
+        """
+        models_response = await self.client.list()
+
+        # Handle both object and dict responses
+        if hasattr(models_response, "models"):
+            models_list = models_response.models
+        elif isinstance(models_response, dict):
+            models_list = models_response.get("models", [])
+        else:
+            raise ValueError("Unexpected models response format")
+
+        # Extract model names
+        model_names = []
+        for m in models_list:
+            if hasattr(m, "model"):
+                model_names.append(m.model)
+            elif hasattr(m, "name"):
+                model_names.append(m.name)
+            elif isinstance(m, dict):
+                model_names.append(m.get("model", m.get("name", "")))
+
+        return model_names
+
     async def health_check(self) -> bool:
         """
         Check if the Ollama service is healthy and the model is available.
@@ -161,28 +217,7 @@ Remember:
             True if the service is healthy, False otherwise.
         """
         try:
-            # Try to list models to verify connection
-            models_response = await self.client.list()
-
-            # Handle both object and dict responses
-            if hasattr(models_response, "models"):
-                models_list = models_response.models
-            elif isinstance(models_response, dict):
-                models_list = models_response.get("models", [])
-            else:
-                return False
-
-            # Extract model names
-            model_names = []
-            for m in models_list:
-                if hasattr(m, "model"):
-                    model_names.append(m.model)
-                elif hasattr(m, "name"):
-                    model_names.append(m.name)
-                elif isinstance(m, dict):
-                    model_names.append(m.get("model", m.get("name", "")))
-
-            # Check if our configured model is available
+            model_names = await self._get_available_models()
             return any(self.model in name for name in model_names)
         except Exception:
             return False
@@ -208,6 +243,26 @@ class OllamaEmbedding(EmbeddingProvider):
         self.timeout = settings.ollama_timeout
         self._dimension: int | None = None
 
+    def _extract_embedding_value(self, response: Any) -> List[float]:
+        """
+        Extract embedding vector from Ollama response object.
+
+        Args:
+            response: Ollama response (object or dict)
+
+        Returns:
+            List[float]: Extracted embedding vector
+
+        Raises:
+            ValueError: If response format is unrecognized
+        """
+        if hasattr(response, "embedding"):
+            return response.embedding
+        elif isinstance(response, dict) and "embedding" in response:
+            return response["embedding"]
+        else:
+            raise ValueError(f"Unexpected response format from Ollama: {response}")
+
     async def get_embedding(self, text: str) -> List[float]:
         """
         Generate an embedding vector for the given text.
@@ -231,15 +286,7 @@ class OllamaEmbedding(EmbeddingProvider):
             )
 
             # Extract the embedding vector from the response object
-            # The Ollama library returns an object with an 'embedding' attribute
-            if hasattr(response, "embedding"):
-                embedding = response.embedding
-            elif isinstance(response, dict) and "embedding" in response:
-                embedding = response["embedding"]
-            else:
-                raise ValueError(
-                    f"Unexpected response format from Ollama: {response}"
-                )
+            embedding = self._extract_embedding_value(response)
 
             # Cache the dimension on first call
             if self._dimension is None:
@@ -314,6 +361,38 @@ class OllamaEmbedding(EmbeddingProvider):
 
         return self._dimension
 
+    async def _get_available_models(self) -> List[str]:
+        """
+        Get list of available model names from Ollama.
+
+        Returns:
+            List of available model names
+
+        Raises:
+            Exception: If unable to retrieve model list
+        """
+        models_response = await self.client.list()
+
+        # Handle both object and dict responses
+        if hasattr(models_response, "models"):
+            models_list = models_response.models
+        elif isinstance(models_response, dict):
+            models_list = models_response.get("models", [])
+        else:
+            raise ValueError("Unexpected models response format")
+
+        # Extract model names
+        model_names = []
+        for m in models_list:
+            if hasattr(m, "model"):
+                model_names.append(m.model)
+            elif hasattr(m, "name"):
+                model_names.append(m.name)
+            elif isinstance(m, dict):
+                model_names.append(m.get("model", m.get("name", "")))
+
+        return model_names
+
     async def health_check(self) -> bool:
         """
         Check if the Ollama embedding service is healthy and the model is available.
@@ -322,28 +401,7 @@ class OllamaEmbedding(EmbeddingProvider):
             True if the service is healthy, False otherwise.
         """
         try:
-            # Try to list models to verify connection
-            models_response = await self.client.list()
-
-            # Handle both object and dict responses
-            if hasattr(models_response, "models"):
-                models_list = models_response.models
-            elif isinstance(models_response, dict):
-                models_list = models_response.get("models", [])
-            else:
-                return False
-
-            # Extract model names
-            model_names = []
-            for m in models_list:
-                if hasattr(m, "model"):
-                    model_names.append(m.model)
-                elif hasattr(m, "name"):
-                    model_names.append(m.name)
-                elif isinstance(m, dict):
-                    model_names.append(m.get("model", m.get("name", "")))
-
-            # Check if our configured embedding model is available
+            model_names = await self._get_available_models()
             return any(self.model in name for name in model_names)
         except Exception:
             return False
