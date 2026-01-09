@@ -137,6 +137,46 @@ export async function queryNotes(query, k = 3) {
 }
 
 /**
+ * Generate flashcards for a topic using RAG + LLM.
+ *
+ * @param {string} topic - Topic to generate flashcards for
+ * @param {number} count - Number of flashcards to generate (1-10, default: 5)
+ * @returns {Promise<Object>} Flashcard response with cards and sources
+ */
+export async function generateFlashcards(topic, count = 5) {
+  const response = await axios.post(
+    `${API_BASE_URL}/api/study/flashcards`,
+    null,
+    {
+      params: { topic, count },
+      timeout: 60000, // 60 second timeout for LLM generation
+    }
+  );
+
+  return response.data;
+}
+
+/**
+ * Generate a quiz question for a topic using RAG + LLM.
+ *
+ * @param {string} topic - Topic for the quiz question
+ * @param {string} difficulty - Difficulty level: "easy", "medium", or "hard" (default: "medium")
+ * @returns {Promise<Object>} Quiz response with question, options, and sources
+ */
+export async function generateQuiz(topic, difficulty = 'medium') {
+  const response = await axios.post(
+    `${API_BASE_URL}/api/study/quiz`,
+    null,
+    {
+      params: { topic, difficulty },
+      timeout: 60000, // 60 second timeout for LLM generation
+    }
+  );
+
+  return response.data;
+}
+
+/**
  * Health check for the API.
  *
  * @returns {Promise<boolean>} True if API is reachable

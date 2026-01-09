@@ -1,37 +1,37 @@
 /**
  * Main App Component.
  *
- * Two-column layout:
- * - Left: Note list with file upload
- * - Right: Chat interface
+ * Linear-style UI with AppShell layout:
+ * - Sidebar navigation (Chat, Flashcards, Library)
+ * - View components with shadcn/ui styling
  */
 
-import { useState } from 'react';
-import NoteList from './components/NoteList';
-import Chat from './components/Chat';
-import './App.css';
+import { useState } from 'react'
+import AppShell from './components/layout/AppShell'
+import ChatView from './components/views/ChatView'
+import FlashcardsView from './components/views/FlashcardsView'
+import LibraryView from './components/views/LibraryView'
 
-function App() {
-  const [selectedNote, setSelectedNote] = useState(null);
+export default function App() {
+  const [activeView, setActiveView] = useState('chat')
+  const [selectedNote, setSelectedNote] = useState(null)
+
+  const renderView = () => {
+    switch (activeView) {
+      case 'chat':
+        return <ChatView selectedNote={selectedNote} />
+      case 'flashcards':
+        return <FlashcardsView />
+      case 'library':
+        return <LibraryView onNoteSelect={setSelectedNote} />
+      default:
+        return <ChatView selectedNote={selectedNote} />
+    }
+  }
 
   return (
-    <div className="app">
-      <header className="app-header">
-        <h1>📚 RAG Notes App</h1>
-        <p>Local-first note management with AI-powered chat</p>
-      </header>
-
-      <div className="app-layout">
-        <aside className="sidebar">
-          <NoteList onNoteSelect={setSelectedNote} />
-        </aside>
-
-        <main className="main-content">
-          <Chat selectedNote={selectedNote} />
-        </main>
-      </div>
-    </div>
-  );
+    <AppShell activeView={activeView} onViewChange={setActiveView}>
+      {renderView()}
+    </AppShell>
+  )
 }
-
-export default App;

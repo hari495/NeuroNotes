@@ -15,12 +15,14 @@ from app.core.config import Settings, get_settings
 from app.core.interfaces import EmbeddingProvider, LLMProvider
 from app.services.ollama_service import OllamaEmbedding, OllamaLLM
 from app.services.rag_service import RAGService
+from app.services.study_service import StudyService
 
 
 # Singleton instances for service reuse
 _llm_provider: LLMProvider | None = None
 _embedding_provider: EmbeddingProvider | None = None
 _rag_service: RAGService | None = None
+_study_service: StudyService | None = None
 
 
 def get_llm_provider(
@@ -138,6 +140,42 @@ def get_rag_service(
     return _rag_service
 
 
+def get_study_service(
+    rag: Annotated[RAGService, Depends(get_rag_service)],
+    llm: Annotated[LLMProvider, Depends(get_llm_provider)],
+) -> StudyService:
+    """
+    Get or create the Study Service instance.
+
+    This factory creates a singleton instance of the Study Service for
+    generating flashcards and quiz questions from user notes.
+
+    Args:
+        rag: RAG service for retrieving relevant context.
+        llm: LLM provider for generating study materials.
+
+    Returns:
+        An instance of StudyService.
+
+    Example:
+        ```python
+        @app.post("/flashcards")
+        async def flashcards(
+            topic: str,
+            study: Annotated[StudyService, Depends(get_study_service)]
+        ):
+            result = await study.generate_flashcards(topic, count=5)
+            return result
+        ```
+    """
+    global _study_service
+
+    if _study_service is None:
+        _study_service = StudyService(rag_service=rag, llm_provider=llm)
+
+    return _study_service
+
+
 def reset_providers() -> None:
     """
     Reset all provider singletons.
@@ -145,10 +183,11 @@ def reset_providers() -> None:
     This is useful for testing or when you need to reinitialize
     providers with new settings.
     """
-    global _llm_provider, _embedding_provider, _rag_service
+    global _llm_provider, _embedding_provider, _rag_service, _study_service
     _llm_provider = None
     _embedding_provider = None
     _rag_service = None
+    _study_service = None
 
 
 # Type aliases for cleaner dependency injection
