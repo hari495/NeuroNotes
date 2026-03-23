@@ -1,5 +1,9 @@
 # RAG Study App
 
+
+https://github.com/user-attachments/assets/43215f8a-32a3-46df-83c0-0fcaffce62eb
+
+
 A local-first study application that combines note-taking with AI-powered chat using Retrieval-Augmented Generation (RAG). Built with FastAPI, React, Ollama, and ChromaDB.
 
 ## Features
